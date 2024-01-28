@@ -10,10 +10,17 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.data.domain.PageRequest;
 
+import java.awt.print.Pageable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/files")
@@ -66,47 +73,53 @@ public class FileController {
         report.setNumberOfFiles(fileRepository.count());
 
         int topN = 5;
-        report.setTopFoldersBySize(folderRepository.findTopFoldersBySize(PageRequest.of(0, topN)));
-        report.setTopFoldersByFileCount(folderRepository.findTopFoldersByFileCount(PageRequest.of(0, topN)));
-        report.setTopFoldersByAverageFileSize(folderRepository.findTopFoldersByAverageFileSize(PageRequest.of(0, topN)));
+        report.setTopFoldersBySize(folderRepository.findTopFoldersBySize((Pageable) PageRequest.of(0, topN)));
+        report.setTopFoldersByFileCount(folderRepository.findTopFoldersByFileCount((Pageable) PageRequest.of(0, topN)));
+        report.setTopFoldersByAverageFileSize(folderRepository.findTopFoldersByAverageFileSize((Pageable) PageRequest.of(0, topN)));
 
-        report.setDeepestFolderHierarchy(generateDeepestFolderHierarchy());
+        report.setDeepestFolderHierarchy(generateDeepestFolderHierarchy((Pageable) PageRequest.of(0, 10)));
+
 
         return ResponseEntity.ok(report);
     }
 
-    private FolderHierarchyDTO generateDeepestFolderHierarchy(List<FolderEntity> folders) {
-        if (folders == null || folders.isEmpty()) {
-            return null;
-        }
-
-        FolderEntity deepestFolder = findDeepestFolder(folders);
+    private FolderHierarchyDTO generateDeepestFolderHierarchy(Pageable pageable) {
+        List<FolderEntity> allFolders = folderRepository.findAll((org.springframework.data.domain.Pageable) pageable).getContent();
+        FolderEntity deepestFolder = findDeepestFolder(allFolders);
 
         if (deepestFolder != null) {
             FolderHierarchyDTO folderHierarchyDTO = new FolderHierarchyDTO();
             folderHierarchyDTO.setFolderName(deepestFolder.getName());
-            List<FolderHierarchyDTO> subFolders = new ArrayList<>();
-
-            for (FolderEntity subFolder : deepestFolder.getSubFolders()) {
-                FolderHierarchyDTO subFolderHierarchy = generateDeepestFolderHierarchy(subFolder.getSubFolders());
-                subFolders.add(subFolderHierarchy);
-            }
-
-            folderHierarchyDTO.setSubFolders(subFolders);
+            folderHierarchyDTO.setSubFolders(generateSubFolderHierarchy(deepestFolder.getSubFolders(), pageable));
             return folderHierarchyDTO;
         }
+
         return null;
     }
+
+    private List<FolderHierarchyDTO> generateSubFolderHierarchy(List<FolderEntity> subFolders, Pageable pageable) {
+        List<FolderHierarchyDTO> subFolderHierarchy = new ArrayList<>();
+
+        for (FolderEntity subFolder : subFolders) {
+            FolderHierarchyDTO subFolderDTO = new FolderHierarchyDTO();
+            subFolderDTO.setFolderName(subFolder.getName());
+            subFolderDTO.setSubFolders(generateSubFolderHierarchy(subFolder.getSubFolders(), pageable));
+            subFolderHierarchy.add(subFolderDTO);
+        }
+
+        return subFolderHierarchy;
+    }
+
 
     private FolderEntity findDeepestFolder(List<FolderEntity> folders) {
         Map<Long, Set<Long>> folderHierarchy = new HashMap<>();
         Set<Long> allFolderIds = new HashSet<>();
 
         for (FolderEntity folder : folders) {
-            Set<Long> subFoldersIds = folder.getSubFolders().stream().map(FolderEntity::getId).collect(Collections.toSet());
-            folderHierarchy.put(folder.getId(), subFolderIds);
+            Set<Long> subFoldersIds = folder.getSubFolders().stream().map(FolderEntity::getId).collect(Collectors.toSet());
+            folderHierarchy.put(folder.getId(), subFoldersIds);
             allFolderIds.add(folder.getId());
-            allFolderIds.addAll(subFolderIds);
+            allFolderIds.addAll(subFoldersIds);
         }
 
         for (Long folderId : allFolderIds) {
